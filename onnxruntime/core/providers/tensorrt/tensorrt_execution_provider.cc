@@ -973,7 +973,7 @@ Status BindContextOutput(Ort::KernelContext& ctx,
  *
  * In the case of DDS (data-dependent shape) output, TRT requires a provided allocator to allocate memory during runtime.
  * Once the output has been put in the allocation buffer, ORT calls this function to bind the allocation to ORT kernel context output.
- *
+ * 
  * Note: Current approach of setting the ORT kernel context output is copying the output data from allocation buffer to ORT context output address which is not optimal,
  * we are waiting for ORT core to support "assign" memory address to ORT context output. Some works need to be done in ORT memory planner to be aware of this memory support.
  */
@@ -983,12 +983,13 @@ Status BindKernelOutput(Ort::KernelContext& ctx,
                         char const* output_name,
                         size_t output_index,
                         size_t output_type,
-                        cudaStream_t stream) {
+                        cudaStream_t stream,
+                        bool* sync_stream_after_dds_output_copy) {
   auto allocator = allocator_map[output_name].get();
   auto& shape = allocator->getOutputShape();
   auto output_tensor = ctx.GetOutput(output_index, shape);
 
-  /*
+  /* 
    * Return the number of elements specified by the tensor shape (all dimensions multiplied by each other).
    * For 0 dimensions, 1 is returned. If any dimension is less than 0, the result is always -1.
    *
@@ -3441,6 +3442,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
+    bool sync_stream_after_dds_output_copy = false;
+
     // Assign TRT output back to ORT output
     // (1) Bind TRT DDS output to ORT kernel context output. (It needs to wait until enqueueV3 is finished)
     // (2) Cast TRT INT32 output to ORT INT64 output or TRT double output to float output
@@ -3459,7 +3462,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
         if (index_iter != output_indexes.end()) {
           output_index = index_iter->second;
         }
-        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream);
+        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream, &sync_stream_after_dds_output_copy);
         if (status != Status::OK()) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, status.ErrorMessage());
         }
@@ -3477,6 +3480,10 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
           }
         }
       }
+    }
+
+    if (sync_stream_after_dds_output_copy) {
+      CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
     // End CUDA graph capture.
@@ -3734,6 +3741,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
       CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
+    bool sync_stream_after_dds_output_copy = false;
+
     // Assign TRT output back to ORT output
     // (1) Bind TRT DDS output to ORT kernel context output. (It needs to wait until enqueueV3 is finished)
     // (2) Cast TRT INT32 output to ORT INT64 output or TRT double output to float output
@@ -3752,7 +3761,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
         if (index_iter != output_indexes.end()) {
           output_index = index_iter->second;
         }
-        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream);
+        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream, &sync_stream_after_dds_output_copy);
         if (status != Status::OK()) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, status.ErrorMessage());
         }
@@ -3770,6 +3779,10 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
           }
         }
       }
+    }
+
+    if (sync_stream_after_dds_output_copy) {
+      CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
     // End CUDA graph capture.
