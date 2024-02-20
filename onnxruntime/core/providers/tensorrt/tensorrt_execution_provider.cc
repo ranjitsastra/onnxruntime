@@ -983,8 +983,7 @@ Status BindKernelOutput(Ort::KernelContext& ctx,
                         char const* output_name,
                         size_t output_index,
                         size_t output_type,
-                        cudaStream_t stream,
-                        bool* sync_stream_after_dds_output_copy) {
+                        cudaStream_t stream) {
   auto allocator = allocator_map[output_name].get();
   auto& shape = allocator->getOutputShape();
   auto output_tensor = ctx.GetOutput(output_index, shape);
@@ -3442,8 +3441,6 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
-    bool sync_stream_after_dds_output_copy = false;
-
     // Assign TRT output back to ORT output
     // (1) Bind TRT DDS output to ORT kernel context output. (It needs to wait until enqueueV3 is finished)
     // (2) Cast TRT INT32 output to ORT INT64 output or TRT double output to float output
@@ -3462,7 +3459,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
         if (index_iter != output_indexes.end()) {
           output_index = index_iter->second;
         }
-        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream, &sync_stream_after_dds_output_copy);
+        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream);
         if (status != Status::OK()) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, status.ErrorMessage());
         }
@@ -3480,10 +3477,6 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
           }
         }
       }
-    }
-
-    if (sync_stream_after_dds_output_copy) {
-      CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
     // End CUDA graph capture.
@@ -3761,7 +3754,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
         if (index_iter != output_indexes.end()) {
           output_index = index_iter->second;
         }
-        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream, &sync_stream_after_dds_output_copy);
+        auto status = BindKernelOutput(ctx, &mem_info, dds_output_allocator_map, output_name, output_index, output_type, stream);
         if (status != Status::OK()) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, status.ErrorMessage());
         }
@@ -3779,10 +3772,6 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
           }
         }
       }
-    }
-
-    if (sync_stream_after_dds_output_copy) {
-      CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
     }
 
     // End CUDA graph capture.
