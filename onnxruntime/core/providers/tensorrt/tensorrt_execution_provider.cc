@@ -973,7 +973,7 @@ Status BindContextOutput(Ort::KernelContext& ctx,
  *
  * In the case of DDS (data-dependent shape) output, TRT requires a provided allocator to allocate memory during runtime.
  * Once the output has been put in the allocation buffer, ORT calls this function to bind the allocation to ORT kernel context output.
- * 
+ *
  * Note: Current approach of setting the ORT kernel context output is copying the output data from allocation buffer to ORT context output address which is not optimal,
  * we are waiting for ORT core to support "assign" memory address to ORT context output. Some works need to be done in ORT memory planner to be aware of this memory support.
  */
@@ -988,7 +988,7 @@ Status BindKernelOutput(Ort::KernelContext& ctx,
   auto& shape = allocator->getOutputShape();
   auto output_tensor = ctx.GetOutput(output_index, shape);
 
-  /* 
+  /*
    * Return the number of elements specified by the tensor shape (all dimensions multiplied by each other).
    * For 0 dimensions, 1 is returned. If any dimension is less than 0, the result is always -1.
    *
