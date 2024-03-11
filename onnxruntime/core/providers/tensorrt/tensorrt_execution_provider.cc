@@ -393,43 +393,17 @@ std::unique_lock<OrtMutex> TensorrtExecutionProvider::GetApiLock() const {
 /*
  * Get the shape of "shape tensor" input
  */
+template <typename T>
 Status GetShapeOfShapeTensor(Ort::ConstValue& input_tensor,
-                             std::vector<int32_t>& shape_values,
-                             nvinfer1::ICudaEngine* trt_engine,
-                             const char* input_name,
+                             std::vector<T>& shape_values,
+                             nvinfer1::Dims dims,
                              cudaStream_t stream) {
   auto tensor_info = input_tensor.GetTensorTypeAndShapeInfo();
   const auto tensor_shapes = tensor_info.GetShape();
-  const auto tensor_type = tensor_info.GetElementType();
-  nvinfer1::Dims dims = trt_engine->getTensorShape(input_name);
-  int nb_dims = dims.nbDims;
-  int shape_size = nb_dims == 0 ? 1 : static_cast<int>(tensor_shapes[0]);  // The shape of the "shape tensor" is either zero dimension (scalar) or 1-dimension
+  int shape_size = dims.nbDims == 0 ? 1 : static_cast<int>(tensor_shapes[0]);  // The shape of the "shape tensor" is either zero dimension (scalar) or 1-dimension
   shape_values.resize(shape_size, 1);
-
-  switch (tensor_type) {
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: {
-      auto input = std::make_unique<int32_t[]>(shape_size);
-      CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(input.get(), input_tensor.GetTensorData<int32_t>(), shape_size * sizeof(int32_t), cudaMemcpyDeviceToHost, stream));
-      CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
-      for (int j = 0; j < shape_size; ++j) {
-        shape_values[j] = input[j];
-      }
-      break;
-    }
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: {
-      auto input = std::make_unique<int64_t[]>(shape_size);
-      CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(input.get(), input_tensor.GetTensorData<int64_t>(), shape_size * sizeof(int64_t), cudaMemcpyDeviceToHost, stream));
-      CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
-      for (int j = 0; j < shape_size; ++j) {
-        shape_values[j] = static_cast<int32_t>(input[j]);
-      }
-      break;
-    }
-    default: {
-      return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
-                             "TensorRT shape tensor data type: " + std::to_string(tensor_type) + " not supported.");
-    }
-  }
+  CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(&shape_values, input_tensor.GetTensorData<T>(), shape_size * sizeof(T), cudaMemcpyDeviceToHost, stream));
+  CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
   return Status::OK();
 }
 
@@ -556,25 +530,26 @@ Status ApplyProfileShapesFromInputTensorValue(std::vector<nvinfer1::IOptimizatio
                                               nvinfer1::ITensor* input,
                                               ShapeRangesMap& shape_ranges,
                                               const std::unordered_map<std::string, size_t>& input_indexes,
-                                              std::unordered_map<std::string, std::vector<int32_t>>& tensor_shape_values,
+                                              std::unordered_map<std::string, std::vector<int32_t>>& shape_tensor_values, // reference to the map that holds the input shape tensor which is kept alive across EP compute
+                                              std::unordered_map<std::string, std::vector<int64_t>>& shape_tensor_values_int64,  // reference to the map that holds the input shape tensor which is kept alive across EP compute
                                               cudaStream_t stream,
                                               bool* engine_update) {
+  const std::string& input_name = input->getName();
+  nvinfer1::Dims dims = input->getDimensions();
+  int nb_dims = dims.nbDims;
+
+  size_t input_index = 0;
+  const auto& iter = input_indexes.find(input_name);
+  if (iter != input_indexes.end()) {
+    input_index = iter->second;
+  }
+
+  auto input_tensor = ctx.GetInput(input_index);
+  auto tensor_info = input_tensor.GetTensorTypeAndShapeInfo();
+  const auto tensor_shapes = tensor_info.GetShape();
+  auto& shape_ranges_per_input = shape_ranges[input_name];
+
   for (size_t i = 0; i < trt_profiles.size(); i++) {
-    const std::string& input_name = input->getName();
-    nvinfer1::Dims dims = input->getDimensions();
-    int nb_dims = dims.nbDims;
-
-    size_t input_index = 0;
-    const auto& iter = input_indexes.find(input_name);
-    if (iter != input_indexes.end()) {
-      input_index = iter->second;
-    }
-
-    auto input_tensor = ctx.GetInput(input_index);
-    auto tensor_info = input_tensor.GetTensorTypeAndShapeInfo();
-    const auto tensor_shapes = tensor_info.GetShape();
-    auto& shape_ranges_per_input = shape_ranges[input_name];
-
     auto trt_profile = trt_profiles[i];
 
     // If there are multiple profiles, for second and rest of profiles, simply copy the min/max/opt profile values from the first profile.
@@ -609,24 +584,28 @@ Status ApplyProfileShapesFromInputTensorValue(std::vector<nvinfer1::IOptimizatio
     if (input->isShapeTensor()) {
       // Get shape values for shape tensor input
       const auto tensor_type = tensor_info.GetElementType();
-      int shape_size = nb_dims == 0 ? 1 : static_cast<int>(tensor_shapes[0]);  // The shape of the "shape tensor" is either zero dimension (scalar) or 1-dimension
-      tensor_shape_values[input_name].resize(shape_size);
+      int shape_size = dims.nbDims == 0 ? 1 : static_cast<int>(tensor_shapes[0]);  // The shape of the "shape tensor" is either zero dimension (scalar) or 1-dimension  
+      std::vector<int32_t> input_shape_value; // used for setting TRT optimization profile. (Note: TRT optimization profile only support int32 ?)
+      input_shape_value.resize(shape_size);
+     
       switch (tensor_type) {
         case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: {
-          auto input = std::make_unique<int32_t[]>(shape_size);
-          CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(input.get(), input_tensor.GetTensorData<int32_t>(), shape_size * sizeof(int32_t), cudaMemcpyDeviceToHost, stream));
-          CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
-          for (int j = 0; j < shape_size; ++j) {
-            tensor_shape_values[input_name][j] = input[j];
+          shape_tensor_values[input_name].resize(shape_size);
+          auto status = GetShapeOfShapeTensor<int32_t>(input_tensor, shape_tensor_values[input_name], dims, stream);
+          if (status != Status::OK()) {
+            return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
           }
+          input_shape_value = shape_tensor_values[input_name];
           break;
         }
         case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: {
-          auto input = std::make_unique<int64_t[]>(shape_size);
-          CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(input.get(), input_tensor.GetTensorData<int64_t>(), shape_size * sizeof(int64_t), cudaMemcpyDeviceToHost, stream));
-          CUDA_RETURN_IF_ERROR(cudaStreamSynchronize(stream));
+          shape_tensor_values_int64[input_name].resize(shape_size);
+          auto status = GetShapeOfShapeTensor<int64_t>(input_tensor, shape_tensor_values_int64[input_name], dims, stream);
+          if (status != Status::OK()) {
+            return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
+          }
           for (int j = 0; j < shape_size; ++j) {
-            tensor_shape_values[input_name][j] = static_cast<int32_t>(input[j]);
+            input_shape_value[j] = static_cast<int32_t>(shape_tensor_values_int64[input_name][j]);
           }
           break;
         }
@@ -647,7 +626,8 @@ Status ApplyProfileShapesFromInputTensorValue(std::vector<nvinfer1::IOptimizatio
           shapes_max[j] = static_cast<int32_t>(shape_range[1]);
           shapes_opt[j] = static_cast<int32_t>(shape_range[2]);
 
-          const auto& tensor_shape_value = tensor_shape_values[input_name][j];
+          //const auto& tensor_shape_value = shape_tensor_values[input_name][j];
+          const auto& tensor_shape_value = input_shape_value[j];
           // Update shape range lower bound
           if (tensor_shape_value < shape_range[0]) {
             shape_range[0] = tensor_shape_value;
@@ -667,7 +647,8 @@ Status ApplyProfileShapesFromInputTensorValue(std::vector<nvinfer1::IOptimizatio
         // If shape size doesn't match, initialize shape_range with the new shape value
         shape_ranges_per_input.clear();
         for (int j = 0; j < shape_size; ++j) {
-          const auto& tensor_shape_value = tensor_shape_values[input_name][j];
+          //const auto& tensor_shape_value = shape_tensor_values[input_name][j];
+          const auto& tensor_shape_value = input_shape_value[j];
           std::vector<std::vector<int64_t>> profile_vector;
           std::vector<int64_t> shape_vector{tensor_shape_value, tensor_shape_value, tensor_shape_value};
           profile_vector.push_back(shape_vector);  // only one profile needed
@@ -800,7 +781,8 @@ Status BindContextInput(Ort::KernelContext& ctx,
                         nvinfer1::IExecutionContext* trt_context,
                         const char* input_name,
                         size_t input_index,
-                        std::vector<int32_t>& shape_values,  // only for "shape tensor"
+                        std::unordered_map<std::string, std::vector<int32_t>>& shape_tensor_values, // only use for shape tensor
+                        std::unordered_map<std::string, std::vector<int64_t>>& shape_tensor_values_int64, // only use for shape tensor
                         std::vector<IAllocatorUniquePtr<void>>& scratch_buffers,
                         OrtAllocator* alloc,
                         cudaStream_t stream) {
@@ -821,19 +803,49 @@ Status BindContextInput(Ort::KernelContext& ctx,
   const auto elem_cnt = tensor_info.GetElementCount();
 
   if (trt_engine->isShapeInferenceIO(input_name)) {
-    // Get the shape value of "shape tensor"
-    if (shape_values.empty()) {
-      auto status = GetShapeOfShapeTensor(input_tensor, shape_values, trt_engine, input_name, stream);
-      if (status != Status::OK()) {
-        return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
-      }
-    }
-
     // Bind "shape tensor" input buffer
-    if (!trt_context->setTensorAddress(input_name, &shape_values[0])) {
-      std::string error_input_name = input_name;
-      ORT_THROW_IF_ERROR(ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
-                                         "TensorRT EP failed to call nvinfer1::IExecutionContext::setTensorAddress() for shape input '" + error_input_name + "'"));
+    switch (tensor_type) {
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: {
+        // get shape tensor value if not present
+        if (shape_tensor_values.find(input_name) == shape_tensor_values.end()) {
+          std::vector<int32_t> shape_tensor_value;
+          auto status = GetShapeOfShapeTensor<int32_t>(input_tensor, shape_tensor_value, trt_engine->getTensorShape(input_name), stream);
+          if (status != Status::OK()) {
+            return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
+          }
+          shape_tensor_values[input_name] = shape_tensor_value;
+        }
+
+        if (!trt_context->setTensorAddress(input_name, &shape_tensor_values[input_name][0])) {
+          std::string error_input_name = input_name;
+          ORT_THROW_IF_ERROR(ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
+                                             "TensorRT EP failed to call nvinfer1::IExecutionContext::setTensorAddress() for shape input '" + error_input_name + "'"));
+        }
+        break;
+      }
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: {
+        // get shape tensor value if not present
+        if (shape_tensor_values_int64.find(input_name) == shape_tensor_values_int64.end()) {
+          std::vector<int64_t> shape_tensor_value_int64;
+          auto status = GetShapeOfShapeTensor<int64_t>(input_tensor, shape_tensor_value_int64, trt_engine->getTensorShape(input_name), stream);
+          if (status != Status::OK()) {
+            return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
+          }
+          shape_tensor_values_int64[input_name] = shape_tensor_value_int64;
+        }
+
+        if (!trt_context->setTensorAddress(input_name, &shape_tensor_values_int64[input_name][0])) {
+          std::string error_input_name = input_name;
+          ORT_THROW_IF_ERROR(ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
+                                             "TensorRT EP failed to call nvinfer1::IExecutionContext::setTensorAddress() for shape input '" + error_input_name + "'"));
+        }
+        break;
+      }
+      default: {
+        std::string error_input_name = input_name;
+        return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
+                               "The data type of shape tensor should be INT32 or INT64. Please check the data type of " + error_input_name);
+      }
     }
   } else {
     // Set shape for input tensor which is execution tensor
@@ -3034,7 +3046,14 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
     const std::unordered_map<std::string, size_t>& output_indexes = (trt_state->output_info)[0];
     const std::unordered_map<std::string, size_t>& output_types = (trt_state->output_info)[1];
     auto fused_node_name = trt_state->fused_node_name;
+    // This map "shape_ranges" contains the shape related info for setting TRT optimization profiles.
+    // The info is used for both shape tensor and execution tensor:
+    // shape tensor     -> ( only use "0" as key -> shape values ) 
+    // execution tensor -> (dimension -> <min, max, opt> as shape range)
+    //
     auto& shape_ranges = trt_state->input_shape_ranges;
+    std::unordered_map<std::string, std::vector<int32_t>> shape_tensor_values;  // This map holds "shape tensor -> shape values" for this inference run
+    std::unordered_map<std::string, std::vector<int64_t>> shape_tensor_values_int64;  // This map holds "shape tensor -> shape values" for this inference run
     auto& dds_output_allocator_map = this->dds_output_allocator_maps_[fused_node_name];
     auto trt_builder = trt_state->builder;
     auto trt_engine = trt_state->engine->get();
@@ -3046,7 +3065,6 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
     bool engine_update = false;
     bool context_update = false;
     std::unordered_set<std::string> input_names;
-    std::unordered_map<std::string, std::vector<int32_t>> tensor_shape_values;
 
     OrtMemoryInfo mem_info("", OrtAllocatorType::OrtDeviceAllocator, OrtDevice(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, device_id_), device_id_);
     if (alloc_ == nullptr) {
@@ -3143,7 +3161,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       // If there is any input tensor in shape_ranges, it means this input tensor has dynamic shape and its profile shape values have not yet resolved.
       // TRT EP will help determine the min/max/opt profile values based on current input tensor value.
       if (shape_ranges.find(input_name) != shape_ranges.end()) {
-        auto status = ApplyProfileShapesFromInputTensorValue(trt_profiles, ctx, input, shape_ranges, input_indexes, tensor_shape_values, stream, &engine_update);
+        auto status = ApplyProfileShapesFromInputTensorValue(trt_profiles, ctx, input, shape_ranges, input_indexes, shape_tensor_values, shape_tensor_values_int64, stream, &engine_update);
         if (status != Status::OK()) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP failed to parse input tensor and generate optimization profiles.");
         }
@@ -3356,13 +3374,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       auto tensor_info = input_tensor.GetTensorTypeAndShapeInfo();
       const auto tensor_shapes = tensor_info.GetShape();
 
-      // Only use for "shape tensor" input
-      std::vector<int32_t> shape_values;
-      if (tensor_shape_values.find(input_name) != tensor_shape_values.end()) {
-        shape_values = tensor_shape_values[input_name];
-      }
-
-      auto status = BindContextInput(ctx, trt_engine, trt_context, input_name, input_index, shape_values, scratch_buffers, alloc, stream);
+      auto status = BindContextInput(ctx, trt_engine, trt_context, input_name, input_index, shape_tensor_values, shape_tensor_values_int64, scratch_buffers, alloc, stream);
       if (status != Status::OK()) {
         return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
       }
@@ -3615,8 +3627,9 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
     auto trt_engine = trt_state->engine->get();
     auto trt_context = trt_state->context->get();
     auto max_context_mem_size_ptr = trt_state->max_context_mem_size_ptr;
-    // int num_inputs = static_cast<int>(input_indexes.size());
     int num_outputs = static_cast<int>(output_indexes.size());
+    std::unordered_map<std::string, std::vector<int32_t>> shape_tensor_values;        // This map holds "shape tensor -> shape values" for this inference run
+    std::unordered_map<std::string, std::vector<int64_t>> shape_tensor_values_int64;  // This map holds "shape tensor -> shape values" for this inference run
 
     OrtMemoryInfo mem_info("", OrtAllocatorType::OrtDeviceAllocator, OrtDevice(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, device_id_), device_id_);
     if (alloc_ == nullptr) {
@@ -3654,10 +3667,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
         input_index = iter->second;
       }
 
-      // Only use for "shape tensor" input
-      std::vector<int32_t> shape_values;
-
-      Status status = BindContextInput(ctx, trt_engine, trt_context, input_name, input_index, shape_values, scratch_buffers, alloc, stream);
+      Status status = BindContextInput(ctx, trt_engine, trt_context, input_name, input_index, shape_tensor_values, shape_tensor_values_int64, scratch_buffers, alloc, stream);
       if (status != Status::OK()) {
         return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, status.ErrorMessage());
       }

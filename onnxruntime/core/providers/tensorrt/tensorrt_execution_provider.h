@@ -133,6 +133,13 @@ class OutputAllocator : public nvinfer1::IOutputAllocator {
   std::vector<int64_t> output_shapes;
 };
 
+/* 
+ * It's used to save shape related info for shape tensor and execution tensor:
+ * 
+ * shape tensor     -> ( only use "0" as key -> shape values ) 
+ * execution tensor -> ( dimension -> <min, max, opt> as shape range )
+ * 
+ */
 using ShapeRangesMap = std::unordered_map<std::string, std::unordered_map<size_t, std::vector<std::vector<int64_t>>>>;
 
 // Information to construct kernel function state.
@@ -233,8 +240,8 @@ class TensorrtExecutionProvider : public IExecutionProvider {
   common::Status Compile(const std::vector<FusedNodeAndGraph>& fused_nodes_and_graphs,
                          std::vector<NodeComputeInfo>& node_compute_funcs) override;
 
-  Status OnRunStart(const onnxruntime::RunOptions& run_options) override;
-  Status OnRunEnd(bool sync_stream, const onnxruntime::RunOptions& run_options) override;
+  Status OnRunStart(const onnxruntime::RunOptions& /*run_options*/) override;
+  Status OnRunEnd(bool sync_stream, const onnxruntime::RunOptions& /*run_options*/) override;
 
   ProviderOptions GetProviderOptions() const override {
     return TensorrtExecutionProviderInfo::ToProviderOptions(info_);
