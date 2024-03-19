@@ -13,6 +13,10 @@ if (onnxruntime_USE_TVM)
   list(APPEND TEST_INC_DIR ${TVM_INCLUDES})
 endif()
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+  list(APPEND TEST_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build/Linux/${CMAKE_BUILD_TYPE}/_deps/onnx-src/")
+endif()
+
 set(disabled_warnings)
 function(AddTest)
   cmake_parse_arguments(_UT "DYN" "TARGET" "LIBS;SOURCES;DEPENDS;TEST_ARGS" ${ARGN})
@@ -108,6 +112,9 @@ function(AddTest)
     target_compile_options(${_UT_TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcompiler -Wno-error=sign-compare>"
             "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:-Wno-error=sign-compare>")
     target_compile_options(${_UT_TARGET} PRIVATE "-Wno-error=uninitialized")
+    if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+      target_compile_options(${_UT_TARGET} PRIVATE "-Wno-error") 
+    endif()
   endif()
 
   set(TEST_ARGS ${_UT_TEST_ARGS})
@@ -578,6 +585,9 @@ set(ONNXRUNTIME_TEST_LIBS
     onnxruntime_common
     onnxruntime_flatbuffers
 )
+if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+list(APPEND ONNXRUNTIME_TEST_LIBS iconv gtest)
+endif()
 
 if (onnxruntime_ENABLE_TRAINING)
   set(ONNXRUNTIME_TEST_LIBS onnxruntime_training_runner onnxruntime_training ${ONNXRUNTIME_TEST_LIBS})
@@ -1221,6 +1231,10 @@ if (NOT onnxruntime_ENABLE_TRAINING_TORCH_INTEROP)
     if (CMAKE_SYSTEM_NAME STREQUAL "Android")
       list(APPEND onnxruntime_shared_lib_test_LIBS ${android_shared_libs})
     endif()
+        #AIX To do - similar to issue 13554 where symbols expected to be defined though not used by AIX ld
+    if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+       list(APPEND onnxruntime_shared_lib_test_LIBS onnxruntime_graph onnxruntime_session onnxruntime_providers onnxruntime_framework onnxruntime_util onnxruntime_mlas onnxruntime_optimizer onnxruntime_flatbuffers iconv re2)
+    endif()
 
     AddTest(DYN
             TARGET onnxruntime_shared_lib_test
@@ -1431,7 +1445,7 @@ if (NOT onnxruntime_BUILD_WEBASSEMBLY)
   if(UNIX)
     if (APPLE)
       set(ONNXRUNTIME_CUSTOM_OP_LIB_LINK_FLAG "-Xlinker -dead_strip")
-    else()
+	elseif(NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
       set(ONNXRUNTIME_CUSTOM_OP_LIB_LINK_FLAG "-Xlinker --version-script=${TEST_SRC_DIR}/testdata/custom_op_library/custom_op_library.lds -Xlinker --no-undefined -Xlinker --gc-sections -z noexecstack")
     endif()
   else()
@@ -1516,7 +1530,7 @@ if (NOT onnxruntime_BUILD_WEBASSEMBLY AND (NOT onnxruntime_MINIMAL_BUILD OR onnx
   if(UNIX)
     if (APPLE)
       set(ONNXRUNTIME_CUSTOM_OP_INVALID_LIB_LINK_FLAG "-Xlinker -dead_strip")
-    else()
+	elseif(NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
       string(CONCAT ONNXRUNTIME_CUSTOM_OP_INVALID_LIB_LINK_FLAG
              "-Xlinker --version-script=${TEST_SRC_DIR}/testdata/custom_op_invalid_library/custom_op_library.lds "
              "-Xlinker --no-undefined -Xlinker --gc-sections -z noexecstack")
@@ -1548,9 +1562,9 @@ if (NOT onnxruntime_BUILD_WEBASSEMBLY AND (NOT onnxruntime_MINIMAL_BUILD OR onnx
     if (APPLE)
       set(ONNXRUNTIME_CUSTOM_OP_GET_CONST_INPUT_TEST_LIB_LINK_FLAG "-Xlinker -dead_strip")
     else()
-      string(CONCAT ONNXRUNTIME_CUSTOM_OP_GET_CONST_INPUT_TEST_LIB_LINK_FLAG
-             "-Xlinker --version-script=${TEST_SRC_DIR}/testdata/custom_op_get_const_input_test_library/custom_op_lib.lds "
-             "-Xlinker --no-undefined -Xlinker --gc-sections -z noexecstack")
+   #   string(CONCAT ONNXRUNTIME_CUSTOM_OP_GET_CONST_INPUT_TEST_LIB_LINK_FLAG
+   #          "-Xlinker --version-script=${TEST_SRC_DIR}/testdata/custom_op_get_const_input_test_library/custom_op_lib.lds "
+   #          "-Xlinker --no-undefined -Xlinker --gc-sections -z noexecstack")
     endif()
   else()
     set(ONNXRUNTIME_CUSTOM_OP_GET_CONST_INPUT_TEST_LIB_LINK_FLAG
@@ -1629,9 +1643,11 @@ if (NOT onnxruntime_MINIMAL_BUILD AND NOT onnxruntime_EXTENDED_MINIMAL_BUILD
   if(APPLE)
     set_property(TARGET test_execution_provider APPEND_STRING PROPERTY LINK_FLAGS "-Xlinker -exported_symbols_list ${REPO_ROOT}/onnxruntime/test/testdata/custom_execution_provider_library/exported_symbols.lst")
   elseif(UNIX)
-    set_property(TARGET test_execution_provider APPEND_STRING PROPERTY LINK_FLAGS "-Xlinker --version-script=${REPO_ROOT}/onnxruntime/test/testdata/custom_execution_provider_library/version_script.lds -Xlinker --gc-sections -Xlinker -rpath=\\$ORIGIN")
-  elseif(WIN32)
-    set_property(TARGET test_execution_provider APPEND_STRING PROPERTY LINK_FLAGS "-DEF:${REPO_ROOT}/onnxruntime/test/testdata/custom_execution_provider_library/symbols.def")
+if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+       set_property(TARGET test_execution_provider APPEND_STRING PROPERTY LINK_FLAGS "-Xlinker -bE:${REPO_ROOT}/onnxruntime/test/testdata/custom_execution_provider_library/symbols.exp")
+     else()
+       set_property(TARGET test_execution_provider APPEND_STRING PROPERTY LINK_FLAGS "-Xlinker --version-script=${REPO_ROOT}/onnxruntime/test/testdata/custom_execution_provider_library/version_script.lds -Xlinker --gc-sections -Xlinker -rpath=\\$ORIGIN")
+     endif()
   else()
     message(FATAL_ERROR "test_execution_provider unknown platform, need to specify shared library exports for it")
   endif()

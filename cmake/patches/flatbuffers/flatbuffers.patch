@@ -1,0 +1,49 @@
+--- ./src/util.cpp.origin	2024-03-19 04:32:35.541166189 -0500
++++ ./src/util.cpp	2024-03-19 04:33:00.397010580 -0500
+@@ -32,7 +32,7 @@
+ #  include <winbase.h>
+ #  undef interface  // This is also important because of reasons
+ #else
+-#  define _XOPEN_SOURCE 600 // For PATH_MAX from limits.h (SUSv2 extension) 
++#  define _XOPEN_SOURCE 700 // For PATH_MAX from limits.h (SUSv2 extension) 
+ #  include <limits.h>
+ #endif
+ // clang-format on
+--- ./include/flatbuffers/flatbuffers.h.origin	2024-03-19 04:35:09.628046207 -0500
++++ ./include/flatbuffers/flatbuffers.h	2024-03-19 04:36:13.596889930 -0500
+@@ -2702,7 +2702,7 @@
+ // clang-format on
+ 
+ // Basic type info cost just 16bits per field!
+-struct TypeCode {
++struct __attribute__((packed)) TypeCode {
+   uint16_t base_type : 4;  // ElementaryType
+   uint16_t is_vector : 1;
+   int16_t sequence_ref : 11;  // Index into type_refs below, or -1 for none.
+
+--- ./src/idl_gen_rust.cpp.origin	2024-03-19 04:38:09.481169499 -0500
++++ ./src/idl_gen_rust.cpp	2024-03-19 04:38:27.414703189 -0500
+@@ -1,4 +1,4 @@
+-/*
++ize_*
+  * Copyright 2018 Google Inc. All rights reserved.
+  *
+  * Licensed under the Apache License, Version 2.0 (the "License");
+@@ -406,7 +406,7 @@
+     // example: f(A, D::E)          -> super::D::E
+     // does not include leaf object (typically a struct type).
+ 
+-    size_t i = 0;
++    //size_t i = 0;
+     std::stringstream stream;
+ 
+     auto s = src->components.begin();
+@@ -417,7 +417,7 @@
+       if (*s != *d) { break; }
+       ++s;
+       ++d;
+-      ++i;
++     // ++i;
+     }
+ 
+     for (; s != src->components.end(); ++s) { stream << "super::"; }

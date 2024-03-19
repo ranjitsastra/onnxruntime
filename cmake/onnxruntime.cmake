@@ -97,7 +97,7 @@ elseif(onnxruntime_BUILD_APPLE_FRAMEWORK)
     SOVERSION  ${ORT_VERSION}
   )
 else()
-  onnxruntime_add_shared_library(onnxruntime ${CMAKE_CURRENT_BINARY_DIR}/generated_source.c)
+  onnxruntime_add_shared_library(onnxruntime ${CMAKE_CURRENT_BINARY_DIR}/generated_source.c "${ONNXRUNTIME_ROOT}/core/session/onnxruntime_c_api.cc")
   if (onnxruntime_USE_CUDA)
     set_property(TARGET onnxruntime APPEND_STRING PROPERTY LINK_FLAGS " -Xlinker -rpath=\\$ORIGIN")
   endif()
@@ -116,6 +116,8 @@ target_compile_definitions(onnxruntime PRIVATE FILE_NAME=\"onnxruntime.dll\")
 if(UNIX)
   if (APPLE)
     set(ONNXRUNTIME_SO_LINK_FLAG " -Xlinker -dead_strip")
+  elseif(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+    set(ONNXRUNTIME_SO_LINK_FLAG " -Xlinker -bE:${SYMBOL_FILE}")
   else()
     set(ONNXRUNTIME_SO_LINK_FLAG " -Xlinker --version-script=${SYMBOL_FILE} -Xlinker --no-undefined -Xlinker --gc-sections -z noexecstack")
   endif()
@@ -136,6 +138,8 @@ if (NOT WIN32)
     else()
         set_target_properties(onnxruntime PROPERTIES INSTALL_RPATH "@loader_path")
     endif()
+  elseif (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-L${ORIGIN}")
   elseif (NOT onnxruntime_BUILD_WEBASSEMBLY)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath='$ORIGIN'")
   endif()
@@ -204,6 +208,10 @@ set(onnxruntime_INTERNAL_LIBRARIES
   onnxruntime_common
   onnxruntime_flatbuffers
 )
+
+if (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+list(APPEND onnxruntime_INTERNAL_LIBRARIES iconv)
+endif()
 
 if (onnxruntime_ENABLE_LANGUAGE_INTEROP_OPS)
   list(APPEND onnxruntime_INTERNAL_LIBRARIES

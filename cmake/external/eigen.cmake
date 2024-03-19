@@ -13,7 +13,7 @@ else ()
     else()
         FetchContent_Declare(
         eigen
-        URL https://gitlab.com/libeigen/eigen/-/archive/d10b27fe37736d2944630ecd7557cefa95cf87c9/eigen-d10b27fe37736d2944630ecd7557cefa95cf87c9.zip
+		URL https://gitlab.com/libeigen/eigen/-/archive/bb51d9f4fa3cf1114348b9180640d6da7d3964f9/eigen-bb51d9f4fa3cf1114348b9180640d6da7d3964f9.zip
 		)
     endif()
     FetchContent_Populate(eigen)
