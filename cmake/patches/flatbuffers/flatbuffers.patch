@@ -23,12 +23,6 @@
 
 --- ./src/idl_gen_rust.cpp.origin	2024-03-19 04:38:09.481169499 -0500
 +++ ./src/idl_gen_rust.cpp	2024-03-19 04:38:27.414703189 -0500
-@@ -1,4 +1,4 @@
--/*
-+ize_*
-  * Copyright 2018 Google Inc. All rights reserved.
-  *
-  * Licensed under the Apache License, Version 2.0 (the "License");
 @@ -406,7 +406,7 @@
      // example: f(A, D::E)          -> super::D::E
      // does not include leaf object (typically a struct type).
