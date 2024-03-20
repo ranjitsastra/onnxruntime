@@ -24,7 +24,10 @@ Abstract:
 #if defined(__linux__)
 #include <sys/auxv.h>
 #elif defined(_AIX)
+#define POWER_10       0x40000
+#define POWER_10_ANDUP (POWER_10)
 #include <sys/systemcfg.h>
+#define __power_10_andup() (_system_configuration.implementation & POWER_10_ANDUP)
 #endif
 #endif
 
