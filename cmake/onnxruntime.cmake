@@ -46,7 +46,7 @@ endmacro()
 #If you want to verify if there is any extra line in symbols.txt, run
 # nm -C -g --defined libonnxruntime.so |grep -v '\sA\s' | cut -f 3 -d ' ' | sort
 # after build
-
+if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
 list(APPEND SYMBOL_FILES "${REPO_ROOT}/tools/ci_build/gen_def.py")
 foreach(f ${ONNXRUNTIME_PROVIDER_NAMES})
   list(APPEND SYMBOL_FILES "${ONNXRUNTIME_ROOT}/core/providers/${f}/symbols.txt")
@@ -59,8 +59,8 @@ add_custom_command(OUTPUT ${SYMBOL_FILE} ${CMAKE_CURRENT_BINARY_DIR}/generated_s
     --output_source ${CMAKE_CURRENT_BINARY_DIR}/generated_source.c
   DEPENDS ${SYMBOL_FILES}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
 add_custom_target(onnxruntime_generate_def ALL DEPENDS ${SYMBOL_FILE} ${CMAKE_CURRENT_BINARY_DIR}/generated_source.c)
+endif()
 if(WIN32)
   onnxruntime_add_shared_library(onnxruntime
     ${SYMBOL_FILE}
@@ -97,13 +97,20 @@ elseif(onnxruntime_BUILD_APPLE_FRAMEWORK)
     SOVERSION  ${ORT_VERSION}
   )
 else()
-  onnxruntime_add_shared_library(onnxruntime ${CMAKE_CURRENT_BINARY_DIR}/generated_source.c "${ONNXRUNTIME_ROOT}/core/session/onnxruntime_c_api.cc")
+  if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+     onnxruntime_add_shared_library(onnxruntime ${ONNXRUNTIME_ROOT}/core/session/onnxruntime_c_api.cc)
+  else()
+    onnxruntime_add_shared_library(onnxruntime ${CMAKE_CURRENT_BINARY_DIR}/generated_source.c)
+  endif()
   if (onnxruntime_USE_CUDA)
     set_property(TARGET onnxruntime APPEND_STRING PROPERTY LINK_FLAGS " -Xlinker -rpath=\\$ORIGIN")
   endif()
 endif()
-
-add_dependencies(onnxruntime onnxruntime_generate_def ${onnxruntime_EXTERNAL_DEPENDENCIES})
+if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+   add_dependencies(onnxruntime ${onnxruntime_EXTERNAL_DEPENDENCIES})
+else()
+   add_dependencies(onnxruntime onnxruntime_generate_def ${onnxruntime_EXTERNAL_DEPENDENCIES})
+endif()
 target_include_directories(onnxruntime PRIVATE ${ONNXRUNTIME_ROOT})
 
 target_compile_definitions(onnxruntime PRIVATE VER_MAJOR=${VERSION_MAJOR_PART})
@@ -116,9 +123,7 @@ target_compile_definitions(onnxruntime PRIVATE FILE_NAME=\"onnxruntime.dll\")
 if(UNIX)
   if (APPLE)
     set(ONNXRUNTIME_SO_LINK_FLAG " -Xlinker -dead_strip")
-  elseif(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-    set(ONNXRUNTIME_SO_LINK_FLAG " -Xlinker -bE:${SYMBOL_FILE}")
-  else()
+  elseif(NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
     set(ONNXRUNTIME_SO_LINK_FLAG " -Xlinker --version-script=${SYMBOL_FILE} -Xlinker --no-undefined -Xlinker --gc-sections -z noexecstack")
   endif()
 else()
@@ -138,9 +143,7 @@ if (NOT WIN32)
     else()
         set_target_properties(onnxruntime PROPERTIES INSTALL_RPATH "@loader_path")
     endif()
-  elseif (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-L${ORIGIN}")
-  elseif (NOT onnxruntime_BUILD_WEBASSEMBLY)
+  elseif (NOT onnxruntime_BUILD_WEBASSEMBLY AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath='$ORIGIN'")
   endif()
 endif()
@@ -210,7 +213,7 @@ set(onnxruntime_INTERNAL_LIBRARIES
 )
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-list(APPEND onnxruntime_INTERNAL_LIBRARIES iconv)
+   list(APPEND onnxruntime_INTERNAL_LIBRARIES  iconv)
 endif()
 
 if (onnxruntime_ENABLE_LANGUAGE_INTEROP_OPS)
@@ -228,7 +231,9 @@ target_link_libraries(onnxruntime PRIVATE
 )
 
 set_property(TARGET onnxruntime APPEND_STRING PROPERTY LINK_FLAGS ${ONNXRUNTIME_SO_LINK_FLAG} ${onnxruntime_DELAYLOAD_FLAGS})
+if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
 set_target_properties(onnxruntime PROPERTIES LINK_DEPENDS ${SYMBOL_FILE})
+endif()
 
 
 set_target_properties(onnxruntime PROPERTIES VERSION ${ORT_VERSION})

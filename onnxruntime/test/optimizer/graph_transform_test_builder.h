@@ -165,10 +165,7 @@ class ModelTestBuilder {
     ONNX_NAMESPACE::TensorProto tensor_proto;
     tensor_proto.set_name(name);
     tensor_proto.set_data_type(utils::ToTensorProtoElementType<T>());
-    tensor_proto.set_raw_data(data.data(), data.size() * sizeof(T));
-	if (endian::native != endian::little){
-		 ::onnxruntime::utils::ConvertRawDataInTensorProto(&tensor_proto);
-	}
+    utils::SetRawDataInTensorProto(tensor_proto,data.data(), data.size() * sizeof(T));
 
     for (auto& dim : shape) {
       tensor_proto.add_dims(dim);
@@ -187,7 +184,7 @@ class ModelTestBuilder {
     tensor_proto.set_data_type(utils::ToTensorProtoElementType<bool>());
     std::unique_ptr<bool[]> data_buffer = std::make_unique<bool[]>(data.size());
     for (size_t i = 0; i < data.size(); ++i) data_buffer[i] = data[i];
-    tensor_proto.set_raw_data(data_buffer.get(), data.size());
+    utils::SetRawDataInTensorProto(tensor_proto, data_buffer.get(), data.size());
 
     for (auto& dim : shape) {
       tensor_proto.add_dims(dim);

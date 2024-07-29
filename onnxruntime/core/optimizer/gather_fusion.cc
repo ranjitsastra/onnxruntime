@@ -173,10 +173,7 @@ Status GatherToSplitFusion::ApplyImpl(Graph& graph, bool& modified, int graph_le
         axes_initializer_proto.add_dims(static_cast<int64_t>(1));
         axes_initializer_proto.set_data_type(ONNX_NAMESPACE::TensorProto_DataType_INT64);
         InlinedVector<int64_t> axes_value{split_axis};
-        axes_initializer_proto.set_raw_data(axes_value.data(), axes_value.size() * sizeof(int64_t));
-        if constexpr (endian::native != endian::little) {
-           utils::ConvertRawDataInTensorProto((ONNX_NAMESPACE::TensorProto*)&axes_initializer_proto);
-        }
+        utils::SetRawDataInTensorProto(axes_initializer_proto,axes_value.data(), axes_value.size() * sizeof(int64_t));
         NodeArg* axes_arg = &graph_utils::AddInitializer(graph, axes_initializer_proto);
 
         for (size_t i = 0; i < output_count; ++i) {

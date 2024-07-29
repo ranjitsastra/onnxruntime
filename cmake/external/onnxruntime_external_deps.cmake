@@ -37,13 +37,13 @@ if (onnxruntime_BUILD_UNIT_TESTS)
   if (onnxruntime_BUILD_WEBASSEMBLY)
     set(gtest_disable_pthreads ON)
   endif()
+  if (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+     set(gtest_disable_pthreads ON CACHE BOOL "gtest_disable_pthreads" FORCE)
+   endif()
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
   if(NOT onnxruntime_DISABLE_ABSEIL)
     # It uses both ABSL and re2
     set(GTEST_HAS_ABSL OFF CACHE BOOL "" FORCE)
-  endif()
-  if (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-    set(gtest_disable_pthreads ON CACHE BOOL "gtest_disable_pthreads" FORCE)
   endif()
   # gtest and gmock
   FetchContent_Declare(
@@ -94,13 +94,12 @@ set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "FLATBUFFERS_BUILD_TESTS" FORCE)
 set(FLATBUFFERS_INSTALL OFF CACHE BOOL "FLATBUFFERS_INSTALL" FORCE)
 set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "FLATBUFFERS_BUILD_FLATHASH" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "FLATBUFFERS_BUILD_FLATLIB" FORCE)
-
-
 if(Patch_FOUND)
-  set(ONNXRUNTIME_FLATBUFFERS_PATCH_COMMAND ${Patch_EXECUTABLE} -p1 < ${PROJECT_SOURCE_DIR}/patches/flatbuffers/flatbuffers.patch)
+  set(ONNXRUNTIME_FLATBUFFERS_PATCH_COMMAND ${Patch_EXECUTABLE} --binary --ignore-whitespace -p1 < ${PROJECT_SOURCE_DIR}/patches/flatbuffers/flatbuffers.patch)
 else()
  set(ONNXRUNTIME_FLATBUFFERS_PATCH_COMMAND "")
 endif()
+
 #flatbuffers 1.11.0 does not have flatbuffers::IsOutRange, therefore we require 1.12.0+
 FetchContent_Declare(
     flatbuffers
@@ -153,7 +152,7 @@ endif()
 #   for cross-compiling
 #2. if ONNX_CUSTOM_PROTOC_EXECUTABLE is not set, Compile everything(including protoc) from source code.
 if(Patch_FOUND)
-  set(ONNXRUNTIME_PROTOBUF_PATCH_COMMAND ${Patch_EXECUTABLE} -p1 < ${PROJECT_SOURCE_DIR}/patches/protobuf/protobuf_cmake.patch)
+  set(ONNXRUNTIME_PROTOBUF_PATCH_COMMAND ${Patch_EXECUTABLE} --binary --ignore-whitespace -p1 < ${PROJECT_SOURCE_DIR}/patches/protobuf/protobuf_cmake.patch)
 else()
  set(ONNXRUNTIME_PROTOBUF_PATCH_COMMAND "")
 endif()
@@ -396,7 +395,7 @@ else()
 endif()
 
 if(Patch_FOUND)
-  set(ONNXRUNTIME_ONNX_PATCH_COMMAND ${Patch_EXECUTABLE}  -p1 < ${PROJECT_SOURCE_DIR}/patches/onnx/onnx.patch)
+  set(ONNXRUNTIME_ONNX_PATCH_COMMAND ${Patch_EXECUTABLE} --binary --ignore-whitespace -p1 < ${PROJECT_SOURCE_DIR}/patches/onnx/onnx.patch)
 else()
   set(ONNXRUNTIME_ONNX_PATCH_COMMAND "")
 endif()
